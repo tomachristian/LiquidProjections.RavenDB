@@ -15,7 +15,7 @@ namespace LiquidProjections.RavenDB
     /// Throws <see cref="ProjectionException"/> when it detects errors in the event handlers.
     /// </summary>
     public class RavenProjector<TProjection>
-        where TProjection : class, IHaveIdentity, new()
+        where TProjection : class, new()
     {
         private readonly Func<IAsyncDocumentSession> sessionFactory;
         private int batchSize;
@@ -32,25 +32,24 @@ namespace LiquidProjections.RavenDB
         /// but not yet configured how to handle custom actions, projection creation, updating and deletion.
         /// The <see cref="IEventMap{TContext}"/> will be created from it.
         /// </param>
+        /// <param name="setIdentity">
+        /// Is used by the projector to set the identity of the projection.
+        /// </param>
         /// <param name="children">An optional collection of <see cref="IRavenChildProjector"/> which project events
         /// in the same session just before the parent projector.</param>
         public RavenProjector(
             Func<IAsyncDocumentSession> sessionFactory,
             IEventMapBuilder<TProjection, string, RavenProjectionContext> mapBuilder,
+            Action<TProjection, string> setIdentity,
             IEnumerable<IRavenChildProjector> children = null)
         {
-            if (sessionFactory == null)
-            {
-                throw new ArgumentNullException(nameof(sessionFactory));
-            }
-
             if (mapBuilder == null)
             {
                 throw new ArgumentNullException(nameof(mapBuilder));
             }
 
-            this.sessionFactory = sessionFactory;
-            mapConfigurator = new RavenEventMapConfigurator<TProjection>(mapBuilder, children);
+            this.sessionFactory = sessionFactory ?? throw new ArgumentNullException(nameof(sessionFactory));
+            mapConfigurator = new RavenEventMapConfigurator<TProjection>(mapBuilder, setIdentity, children);
         }
 
         /// <summary>
@@ -77,16 +76,8 @@ namespace LiquidProjections.RavenDB
         /// </summary>
         public ShouldRetry ShouldRetry
         {
-            get { return shouldRetry; }
-            set
-            {
-                if (value == null)
-                {
-                    throw new ArgumentNullException(nameof(value), "Retry policy is missing.");
-                }
-
-                shouldRetry = value;
-            }
+            get => shouldRetry;
+            set => shouldRetry = value ?? throw new ArgumentNullException(nameof(value), "Retry policy is missing.");
         }
 
         /// <summary>
@@ -96,17 +87,17 @@ namespace LiquidProjections.RavenDB
         /// </summary>
         public string CollectionName
         {
-            get { return mapConfigurator.CollectionName; }
-            set { mapConfigurator.CollectionName = value; }
+            get => mapConfigurator.CollectionName;
+            set => mapConfigurator.CollectionName = value;
         }
 
         /// <summary>
         /// A cache that can be used to avoid loading projections from the database.
         /// </summary>
-        public IProjectionCache Cache
+        public IProjectionCache<TProjection> Cache
         {
-            get { return mapConfigurator.Cache; }
-            set { mapConfigurator.Cache = value; }
+            get => mapConfigurator.Cache;
+            set => mapConfigurator.Cache = value;
         }
 
         /// <summary>

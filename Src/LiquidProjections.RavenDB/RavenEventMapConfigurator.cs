@@ -6,17 +6,20 @@ using System.Threading.Tasks;
 namespace LiquidProjections.RavenDB
 {
     internal sealed class RavenEventMapConfigurator<TProjection>
-        where TProjection : class, IHaveIdentity, new()
+        where TProjection : class, new()
     {
+        private readonly Action<TProjection, string> setIdentity;
         private readonly IEventMap<RavenProjectionContext> map;
-        private IProjectionCache cache = new PassthroughCache();
+        private IProjectionCache<TProjection> cache = new PassthroughCache<TProjection>();
         private string collectionName = typeof(TProjection).Name;
         private readonly IEnumerable<IRavenChildProjector> children;
 
         public RavenEventMapConfigurator(
-            IEventMapBuilder<TProjection, string, RavenProjectionContext> mapBuilder,
+            IEventMapBuilder<TProjection, string, RavenProjectionContext> mapBuilder, 
+            Action<TProjection, string> setIdentity,
             IEnumerable<IRavenChildProjector> children = null)
         {
+            this.setIdentity = setIdentity;
             if (mapBuilder == null)
             {
                 throw new ArgumentNullException(nameof(mapBuilder));
@@ -28,7 +31,7 @@ namespace LiquidProjections.RavenDB
 
         public string CollectionName
         {
-            get { return collectionName; }
+            get => collectionName;
             set
             {
                 if (string.IsNullOrEmpty(value))
@@ -40,18 +43,10 @@ namespace LiquidProjections.RavenDB
             }
         }
 
-        public IProjectionCache Cache
+        public IProjectionCache<TProjection> Cache
         {
-            get { return cache; }
-            set
-            {
-                if (value == null)
-                {
-                    throw new ArgumentNullException(nameof(value));
-                }
-
-                cache = value;
-            }
+            get => cache;
+            set => cache = value ?? throw new ArgumentNullException(nameof(value));
         }
 
         private IEventMap<RavenProjectionContext> BuildMap(
@@ -67,7 +62,7 @@ namespace LiquidProjections.RavenDB
             Func<TProjection, Task> projector, ProjectionModificationOptions options)
         {
             string databaseId = BuildDatabaseId(key);
-            var projection = (TProjection)await cache.TryGet(databaseId).ConfigureAwait(false);
+            var projection = await cache.TryGet(databaseId).ConfigureAwait(false);
 
             if (projection == null)
             {
@@ -85,7 +80,9 @@ namespace LiquidProjections.RavenDB
                 {
                     case MissingProjectionModificationBehavior.Create:
                     {
-                        projection = new TProjection { Id = databaseId };
+                        projection = new TProjection();
+                        setIdentity(projection, databaseId);
+
                         await projector(projection).ConfigureAwait(false);
                         cache.Add(projection);
                         await context.Session.StoreAsync(projection).ConfigureAwait(false);

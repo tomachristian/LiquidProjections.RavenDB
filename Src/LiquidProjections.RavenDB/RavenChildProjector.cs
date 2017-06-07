@@ -10,7 +10,7 @@ namespace LiquidProjections.RavenDB
     /// Throws <see cref="ProjectionException"/> when it detects errors in the event handlers.
     /// </summary>
     public class RavenChildProjector<TProjection> : IRavenChildProjector
-        where TProjection : class, IHaveIdentity, new()
+        where TProjection : class, new()
     {
         private readonly RavenEventMapConfigurator<TProjection> mapConfigurator;
 
@@ -23,13 +23,17 @@ namespace LiquidProjections.RavenDB
         /// but not yet configured how to handle custom actions, projection creation, updating and deletion.
         /// The <see cref="IEventMap{TContext}"/> will be created from it.
         /// </param>
+        /// <param name="setIdentity">
+        /// Is used by the projector to set the identity of the projection.
+        /// </param>
         /// <param name="children">An optional collection of <see cref="IRavenChildProjector"/> which project events
         /// in the same session just before the parent projector.</param>
         public RavenChildProjector(
             IEventMapBuilder<TProjection, string, RavenProjectionContext> mapBuilder,
+            Action<TProjection, string> setIdentity,
             IEnumerable<IRavenChildProjector> children = null)
         {
-            mapConfigurator = new RavenEventMapConfigurator<TProjection>(mapBuilder, children);
+            mapConfigurator = new RavenEventMapConfigurator<TProjection>(mapBuilder, setIdentity, children);
         }
 
         /// <summary>
@@ -46,7 +50,7 @@ namespace LiquidProjections.RavenDB
         /// <summary>
         /// A cache that can be used to avoid loading projections from the database.
         /// </summary>
-        public IProjectionCache Cache
+        public IProjectionCache<TProjection> Cache
         {
             get { return mapConfigurator.Cache; }
             set { mapConfigurator.Cache = value; }

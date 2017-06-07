@@ -4,13 +4,15 @@ using FluidCaching;
 
 namespace LiquidProjections.RavenDB
 {
-    public class LruProjectionCache : IProjectionCache
+    public class LruProjectionCache<TProjection> : IProjectionCache<TProjection> where TProjection : class
     {
-        private readonly IIndex<string, IHaveIdentity> index;
-        private readonly FluidCache<IHaveIdentity> cache;
+        private readonly Func<TProjection, string> getKey;
+        private readonly IIndex<string, TProjection> index;
+        private readonly FluidCache<TProjection> cache;
 
-        public LruProjectionCache(int capacity, TimeSpan minimumRetention, TimeSpan maximumRetention, Func<DateTime> getUtcNow)
+        public LruProjectionCache(int capacity, TimeSpan minimumRetention, TimeSpan maximumRetention, Func<TProjection, string> getKey, Func<DateTime> getUtcNow)
         {
+            this.getKey = getKey;
             if (capacity < 1)
             {
                 throw new ArgumentOutOfRangeException(nameof(capacity));
@@ -36,8 +38,8 @@ namespace LiquidProjections.RavenDB
                 throw new ArgumentNullException(nameof(getUtcNow));
             }
 
-            cache = new FluidCache<IHaveIdentity>(capacity, minimumRetention, maximumRetention, () => getUtcNow());
-            index = cache.AddIndex("projections", projection => projection.Id);
+            cache = new FluidCache<TProjection>(capacity, minimumRetention, maximumRetention, () => getUtcNow());
+            index = cache.AddIndex("projections", projection => getKey(projection));
         }
 
         public long Hits => cache.Statistics.Hits;
@@ -46,8 +48,7 @@ namespace LiquidProjections.RavenDB
 
         public long CurrentCount => cache.Statistics.Current;
 
-        public async Task<TProjection> Get<TProjection>(string key, Func<Task<TProjection>> createProjection)
-            where TProjection : class, IHaveIdentity
+        public async Task<TProjection> Get(string key, Func<Task<TProjection>> createProjection)            
         {
             return (TProjection)await index.GetItem(key, async _ => await createProjection());
         }
@@ -57,12 +58,12 @@ namespace LiquidProjections.RavenDB
             index.Remove(key);
         }
 
-        public void Add(IHaveIdentity projection)
+        public void Add(TProjection projection)
         {
             cache.Add(projection);
         }
 
-        public Task<IHaveIdentity> TryGet(string key)
+        public Task<TProjection> TryGet(string key)
         {
             return index.GetItem(key);
         }

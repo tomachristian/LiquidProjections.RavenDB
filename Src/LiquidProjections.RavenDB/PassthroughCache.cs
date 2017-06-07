@@ -3,9 +3,9 @@ using System.Threading.Tasks;
 
 namespace LiquidProjections.RavenDB
 {
-    internal class PassthroughCache : IProjectionCache
+    internal class PassthroughCache<TProjection> : IProjectionCache<TProjection>
     {
-        public void Add(IHaveIdentity projection)
+        public void Add(TProjection projection)
         {
             if (projection == null)
             {
@@ -15,8 +15,7 @@ namespace LiquidProjections.RavenDB
             // Do nothing.
         }
 
-        public Task<TProjection> Get<TProjection>(string key, Func<Task<TProjection>> createProjection)
-            where TProjection : class, IHaveIdentity
+        public Task<TProjection> Get(string key, Func<Task<TProjection>> createProjection)
         {
             if (string.IsNullOrEmpty(key))
             {
@@ -41,14 +40,14 @@ namespace LiquidProjections.RavenDB
             // Do nothing.
         }
 
-        public Task<IHaveIdentity> TryGet(string key)
+        public Task<TProjection> TryGet(string key)
         {
             if (string.IsNullOrEmpty(key))
             {
                 throw new ArgumentException("Key is missing.", nameof(key));
             }
 
-            return Task.FromResult<IHaveIdentity>(null);
+            return Task.FromResult(default(TProjection));
         }
     }
 }
