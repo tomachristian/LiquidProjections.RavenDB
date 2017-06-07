@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-
+using LiquidProjections.Abstractions;
 using Raven.Client;
 
 namespace LiquidProjections.RavenDB
@@ -113,7 +113,7 @@ namespace LiquidProjections.RavenDB
         /// Instructs the projector to project a collection of ordered transactions asynchronously
         /// in batches of the configured size <see cref="BatchSize"/>.
         /// </summary>
-        public async Task Handle(IEnumerable<Transaction> transactions)
+        public async Task Handle(IEnumerable<Transaction> transactions, SubscriptionInfo info)
         {
             if (transactions == null)
             {

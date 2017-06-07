@@ -6,7 +6,8 @@ using System.Threading.Tasks;
 using Chill;
 
 using FluentAssertions;
-
+using LiquidProjections.Abstractions;
+using LiquidProjections.Testing;
 using Raven.Client;
 
 using Xunit;
@@ -44,7 +45,10 @@ namespace LiquidProjections.RavenDB.Specs
                     Subject.CollectionName = collectionName;
                 }
 
-                The<MemoryEventSource>().Subscribe(0, Subject.Handle, "");
+                The<MemoryEventSource>().Subscribe(0, new Subscriber
+                {
+                    HandleTransactions = Subject.Handle
+                }, "");
             }
         }
 
@@ -125,7 +129,7 @@ namespace LiquidProjections.RavenDB.Specs
                 {
                     ProductKey = "c350E",
                     Category = "Hybrid"
-                }), deferedExecution: true);
+                }), deferredExecution: true);
             }
 
             [Fact]
@@ -165,7 +169,7 @@ namespace LiquidProjections.RavenDB.Specs
                 {
                     ProductKey = "c350E",
                     Category = "Hybrid"
-                }), deferedExecution: true);
+                }), deferredExecution: true);
             }
 
             [Fact]
@@ -466,7 +470,7 @@ namespace LiquidProjections.RavenDB.Specs
                 When(() => The<MemoryEventSource>().Write(new ProductDiscontinuedEvent
                 {
                     ProductKey = "c350E",
-                }), deferedExecution: true);
+                }), deferredExecution: true);
             }
 
             [Fact]
@@ -673,7 +677,7 @@ namespace LiquidProjections.RavenDB.Specs
                 When(async () => await The<MemoryEventSource>().Write(new ProductDiscontinuedEvent
                 {
                     ProductKey = "c350E",
-                }), deferedExecution: true);
+                }), deferredExecution: true);
             }
 
             [Fact]
@@ -980,7 +984,7 @@ namespace LiquidProjections.RavenDB.Specs
                 {
                     ProductKey = "c350E",
                     Category = "Hybrid"
-                }), deferedExecution: true);
+                }), deferredExecution: true);
             }
 
             [Fact]
@@ -1562,7 +1566,7 @@ namespace LiquidProjections.RavenDB.Specs
                     });
                 });
 
-                When(() => The<MemoryEventSource>().Write(The<Transaction>()), deferedExecution: true);
+                When(() => The<MemoryEventSource>().Write(The<Transaction>()), deferredExecution: true);
             }
 
             [Fact]

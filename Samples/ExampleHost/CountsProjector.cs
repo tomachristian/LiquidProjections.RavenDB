@@ -36,9 +36,9 @@ namespace LiquidProjections.ExampleHost
 
             stopwatch.Start();
 
-            dispatcher.Subscribe(lastCheckpoint, async transactions =>
+            dispatcher.Subscribe(lastCheckpoint, async (transactions, info) =>
             {
-                await documentProjector.Handle(transactions);
+                await documentProjector.Handle(transactions, info);
 
                 transactionCount += transactions.Count;
                 eventCount += transactions.Sum(t => t.Events.Count);
