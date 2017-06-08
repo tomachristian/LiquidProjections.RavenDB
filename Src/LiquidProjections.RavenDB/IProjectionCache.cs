@@ -7,7 +7,7 @@ namespace LiquidProjections.RavenDB
     /// Defines a write-through cache that the <see cref="RavenProjector{TProjection}"/> can use to avoid unnecessary loads
     /// of the projection.
     /// </summary>
-    public interface IProjectionCache
+    public interface IProjectionCache<TProjection>
     {
         /// <summary>
         /// Adds a new item to the cache. 
@@ -15,7 +15,7 @@ namespace LiquidProjections.RavenDB
         /// <remarks>
         /// This method must be safe in multi-threaded scenarios.
         /// </remarks>
-        void Add(IHaveIdentity projection);
+        void Add(TProjection projection);
 
         /// <summary>
         /// Attempts to get the item identified by <paramref name="key"/> from the cache, or creates a new one. 
@@ -24,8 +24,7 @@ namespace LiquidProjections.RavenDB
         /// This method must be safe in multi-threaded scenarios. So multiple concurrent requests for the same key must always 
         /// return the same object.
         /// </remarks>
-        Task<TProjection> Get<TProjection>(string key, Func<Task<TProjection>> createProjection)
-            where TProjection : class, IHaveIdentity;
+        Task<TProjection> Get(string key, Func<Task<TProjection>> createProjection);
 
         /// <summary>
         /// Attempts to get the item identified by <paramref name="key"/> from the cache.
@@ -35,7 +34,7 @@ namespace LiquidProjections.RavenDB
         /// This method must be safe in multi-threaded scenarios. So multiple concurrent requests for the same key must always 
         /// return the same object.
         /// </remarks>
-        Task<IHaveIdentity> TryGet(string key);
+        Task<TProjection> TryGet(string key);
 
         /// <summary>
         /// Removes the item identified by <paramref name="key"/> from the cache.

@@ -18,13 +18,14 @@ namespace LiquidProjections.ExampleHost
         private long transactionCount = 0;
         private RavenProjector<DocumentCountProjection> documentProjector;
         private RavenChildProjector<CountryLookup> countryProjector;
-        private readonly LruProjectionCache cache;
+        private readonly LruProjectionCache<DocumentCountProjection> cache;
 
         public CountsProjector(Dispatcher dispatcher, Func<IAsyncDocumentSession> sessionFactory)
         {
             this.dispatcher = dispatcher;
             this.sessionFactory = sessionFactory;
-            cache = new LruProjectionCache(20000, TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(2), () => DateTime.UtcNow);
+            cache = new LruProjectionCache<DocumentCountProjection>(
+                20000, TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(2), p => p.Id, () => DateTime.UtcNow);
 
             BuildCountryProjector();
             BuildDocumentProjector();
@@ -36,9 +37,9 @@ namespace LiquidProjections.ExampleHost
 
             stopwatch.Start();
 
-            dispatcher.Subscribe(lastCheckpoint, async transactions =>
+            dispatcher.Subscribe(lastCheckpoint, async (transactions, info) =>
             {
-                await documentProjector.Handle(transactions);
+                await documentProjector.Handle(transactions, info);
 
                 transactionCount += transactions.Count;
                 eventCount += transactions.Sum(t => t.Events.Count);
@@ -229,6 +230,7 @@ namespace LiquidProjections.ExampleHost
             documentProjector = new RavenProjector<DocumentCountProjection>(
                 sessionFactory,
                 documentMapBuilder,
+                (projection, identity) => projection.Id = identity,
                 new[] { countryProjector })
             {
                 BatchSize = 20,
@@ -245,9 +247,10 @@ namespace LiquidProjections.ExampleHost
                 .AsCreateOf(anEvent => anEvent.Code)
                 .Using((country, anEvent) => country.Name = anEvent.Name);
 
-            countryProjector = new RavenChildProjector<CountryLookup>(countryMapBuilder)
+            countryProjector = new RavenChildProjector<CountryLookup>(countryMapBuilder, (lookup, identity) => lookup.Id = identity)
             {
-                Cache = cache
+                Cache = new LruProjectionCache<CountryLookup>(
+                    20000, TimeSpan.FromSeconds(30), TimeSpan.FromMinutes(2), p => p.Id, () => DateTime.UtcNow)
             };
         }
 
