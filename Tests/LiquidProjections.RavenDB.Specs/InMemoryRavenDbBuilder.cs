@@ -1,3 +1,5 @@
+using System;
+using System.IO;
 using Raven.Client;
 using Raven.Client.Embedded;
 
@@ -10,6 +12,12 @@ namespace LiquidProjections.RavenDB.Specs
             IDocumentStore store = new EmbeddableDocumentStore
             {
                 RunInMemory = true,
+                DataDirectory = Path.Combine(Environment.CurrentDirectory, "Projections"),
+                Configuration =
+                {
+                    AssembliesDirectory = Path.Combine(Environment.CurrentDirectory, "Assemblies")
+                }
+
             }.Initialize();
 
             return store;

@@ -52,92 +52,62 @@ namespace LiquidProjections.RavenDB
         private IEventMap<RavenProjectionContext> BuildMap(
             IEventMapBuilder<TProjection, string, RavenProjectionContext> mapBuilder)
         {
-            mapBuilder.HandleCustomActionsAs((_, projector) => projector());
-            mapBuilder.HandleProjectionModificationsAs(HandleProjectionModification);
-            mapBuilder.HandleProjectionDeletionsAs(HandleProjectionDeletion);
-            return mapBuilder.Build();
+            return mapBuilder.Build(new ProjectorMap<TProjection, string, RavenProjectionContext>()
+            {
+                Create = OnCreate,
+                Update = OnUpdate,
+                Delete = OnDelete,
+                Custom = (_, projector) => projector() 
+            });
         }
 
-        private async Task HandleProjectionModification(string key, RavenProjectionContext context,
-            Func<TProjection, Task> projector, ProjectionModificationOptions options)
+        private async Task OnCreate(string key, RavenProjectionContext context, Func<TProjection, Task> projector, Func<TProjection, bool> shouldOverwrite)
         {
             string databaseId = BuildDatabaseId(key);
-            var projection = await cache.TryGet(databaseId).ConfigureAwait(false);
-
-            if (projection == null)
+            TProjection projection = await cache.Get(databaseId, async () => await context.Session.LoadAsync<TProjection>(databaseId).ConfigureAwait(false));
+            if ((projection == null) || shouldOverwrite(projection))
             {
-                projection = await context.Session.LoadAsync<TProjection>(databaseId).ConfigureAwait(false);
-
-                if (projection != null)
+                if (projection == null)
                 {
+                    projection = new TProjection();
+                    setIdentity(projection, databaseId);
+
+                    await context.Session.StoreAsync(projection);
                     cache.Add(projection);
                 }
-            }
-
-            if (projection == null)
-            {
-                switch (options.MissingProjectionBehavior)
+                else
                 {
-                    case MissingProjectionModificationBehavior.Create:
-                    {
-                        projection = new TProjection();
-                        setIdentity(projection, databaseId);
-
-                        await projector(projection).ConfigureAwait(false);
-                        cache.Add(projection);
-                        await context.Session.StoreAsync(projection).ConfigureAwait(false);
-                        break;
-                    }
-
-                    case MissingProjectionModificationBehavior.Ignore:
-                    {
-                        break;
-                    }
-
-                    case MissingProjectionModificationBehavior.Throw:
-                    {
-                        throw new ProjectionException($"Projection with id {databaseId} does not exist.");
-                    }
-
-                    default:
-                    {
-                        throw new NotSupportedException(
-                            $"Not supported missing projection behavior {options.MissingProjectionBehavior}.");
-                    }
+                    await context.Session.StoreAsync(projection).ConfigureAwait(false);
                 }
+                
+                await projector(projection).ConfigureAwait(false);
+            }
+        }
+
+        private async Task OnUpdate(string key, RavenProjectionContext context, Func<TProjection, Task> projector, Func<bool> createIfMissing)
+        {
+            string databaseId = BuildDatabaseId(key);
+            TProjection projection = await cache.Get(databaseId, async () => await context.Session.LoadAsync<TProjection>(databaseId).ConfigureAwait(false));
+            if ((projection == null) && createIfMissing())
+            {
+                projection = new TProjection();
+                setIdentity(projection, databaseId);
+                await projector(projection);
+
+                await context.Session.StoreAsync(projection);
+                cache.Add(projection);
             }
             else
             {
-                switch (options.ExistingProjectionBehavior)
+                if (projection != null)
                 {
-                    case ExistingProjectionModificationBehavior.Update:
-                    {
-                        await projector(projection).ConfigureAwait(false);
-                        await context.Session.StoreAsync(projection).ConfigureAwait(false);
-                        break;
-                    }
-
-                    case ExistingProjectionModificationBehavior.Ignore:
-                    {
-                        break;
-                    }
-
-                    case ExistingProjectionModificationBehavior.Throw:
-                    {
-                        throw new ProjectionException($"Projection with id {databaseId} already exists.");
-                    }
-
-                    default:
-                    {
-                        throw new NotSupportedException(
-                            $"Not supported existing projection behavior {options.ExistingProjectionBehavior}.");
-                    }
+                    await projector(projection);
+                    await context.Session.StoreAsync(projection);
                 }
             }
         }
 
-        private async Task HandleProjectionDeletion(string key, RavenProjectionContext context,
-            ProjectionDeletionOptions options)
+        private async Task<bool> OnDelete(string key, RavenProjectionContext context)
         {
             string databaseId = BuildDatabaseId(key);
 
@@ -146,40 +116,25 @@ namespace LiquidProjections.RavenDB
             // Otherwise we can delete fast by id without loading the projection.
             if (context.Session.Advanced.IsLoaded(databaseId) || !await IsCached(databaseId).ConfigureAwait(false))
             {
-                TProjection projection = await context.Session.LoadAsync<TProjection>(databaseId).ConfigureAwait(false);
-
-                if (projection == null)
+                TProjection existingProjection = await context.Session.LoadAsync<TProjection>(databaseId);
+                if (existingProjection != null)
                 {
-                    switch (options.MissingProjectionBehavior)
-                    {
-                        case MissingProjectionDeletionBehavior.Ignore:
-                        {
-                            break;
-                        }
+                    context.Session.Delete(existingProjection);
+                    cache.Remove(key);
 
-                        case MissingProjectionDeletionBehavior.Throw:
-                        {
-                            throw new ProjectionException(
-                                $"Cannot delete projection with id {databaseId}. The projection does not exist.");
-                        }
-
-                        default:
-                        {
-                            throw new NotSupportedException(
-                                $"Not supported missing projection behavior {options.MissingProjectionBehavior}.");
-                        }
-                    }
+                    return true;
                 }
                 else
                 {
-                    context.Session.Delete(projection);
-                    cache.Remove(databaseId);
+                    return false;
                 }
             }
             else
             {
                 context.Session.Delete(databaseId);
                 cache.Remove(databaseId);
+
+                return true;
             }
         }
 

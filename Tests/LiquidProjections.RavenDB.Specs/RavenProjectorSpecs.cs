@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Chill;
 
 using FluentAssertions;
+using FluentAssertions.Extensions;
 using LiquidProjections.Abstractions;
 using LiquidProjections.Testing;
 using Raven.Client;
@@ -135,7 +136,7 @@ namespace LiquidProjections.RavenDB.Specs
             [Fact]
             public void Then_it_should_throw()
             {
-                WhenAction.ShouldThrow<ProjectionException>();
+                WhenAction.Should().Throw<ProjectionException>();
             }
         }
 
@@ -175,7 +176,7 @@ namespace LiquidProjections.RavenDB.Specs
             [Fact]
             public void Then_it_should_throw()
             {
-                WhenAction.ShouldThrow<ProjectionException>();
+                WhenAction.Should().Throw<ProjectionException>();
             }
         }
 
@@ -189,7 +190,7 @@ namespace LiquidProjections.RavenDB.Specs
                 Given(() =>
                 {
                     Events.Map<ProductAddedToCatalogEvent>()
-                        .AsCreateIfDoesNotExistOf(e => e.ProductKey)
+                        .AsCreateOf(e => e.ProductKey).IgnoringDuplicates()
                         .Using((p, e, ctx) => p.Category = e.Category);
 
                     StartProjecting();
@@ -233,7 +234,7 @@ namespace LiquidProjections.RavenDB.Specs
                 Given(async () =>
                 {
                     Events.Map<ProductAddedToCatalogEvent>()
-                        .AsCreateIfDoesNotExistOf(e => e.ProductKey)
+                        .AsCreateOf(e => e.ProductKey).IgnoringDuplicates()
                         .Using((p, e, ctx) => p.Category = e.Category);
 
                     var existingEntry = new ProductCatalogEntry
@@ -280,7 +281,7 @@ namespace LiquidProjections.RavenDB.Specs
                 Given(async () =>
                 {
                     Events.Map<ProductAddedToCatalogEvent>()
-                        .AsCreateIfDoesNotExistOf(e => e.ProductKey)
+                        .AsCreateOf(e => e.ProductKey).IgnoringDuplicates()
                         .Using((p, e, ctx) => p.Category = e.Category);
 
                     var existingEntry = new ProductCatalogEntry
@@ -327,7 +328,7 @@ namespace LiquidProjections.RavenDB.Specs
                 Given(() =>
                 {
                     Events.Map<ProductAddedToCatalogEvent>()
-                        .AsCreateOrUpdateOf(e => e.ProductKey)
+                        .AsCreateOf(e => e.ProductKey).IgnoringDuplicates()
                         .Using((p, e, ctx) => p.Category = e.Category);
 
                     StartProjecting();
@@ -371,7 +372,7 @@ namespace LiquidProjections.RavenDB.Specs
                 Given(async () =>
                 {
                     Events.Map<ProductAddedToCatalogEvent>()
-                        .AsCreateOrUpdateOf(e => e.ProductKey)
+                        .AsCreateOf(e => e.ProductKey).OverwritingDuplicates()
                         .Using((p, e, ctx) => p.Category = e.Category);
 
                     var existingEntry = new ProductCatalogEntry
@@ -418,7 +419,7 @@ namespace LiquidProjections.RavenDB.Specs
                 Given(async () =>
                 {
                     Events.Map<ProductAddedToCatalogEvent>()
-                        .AsCreateOrUpdateOf(e => e.ProductKey)
+                        .AsCreateOf(e => e.ProductKey).OverwritingDuplicates()
                         .Using((p, e, ctx) => p.Category = e.Category);
 
                     var existingEntry = new ProductCatalogEntry
@@ -476,7 +477,7 @@ namespace LiquidProjections.RavenDB.Specs
             [Fact]
             public void Then_it_should_throw()
             {
-                WhenAction.ShouldThrow<ProjectionException>();
+                WhenAction.Should().Throw<ProjectionException>();
             }
         }
 
@@ -669,7 +670,7 @@ namespace LiquidProjections.RavenDB.Specs
             {
                 Given(() =>
                 {
-                    Events.Map<ProductDiscontinuedEvent>().AsDeleteIfExistsOf(e => e.ProductKey);
+                    Events.Map<ProductDiscontinuedEvent>().AsDeleteOf(e => e.ProductKey).IgnoringMisses();
 
                     StartProjecting();
                 });
@@ -683,7 +684,7 @@ namespace LiquidProjections.RavenDB.Specs
             [Fact]
             public void Then_it_should_do_nothing()
             {
-                WhenAction.ShouldNotThrow();
+                WhenAction.Should().NotThrow();
             }
         }
 
@@ -705,7 +706,7 @@ namespace LiquidProjections.RavenDB.Specs
                         await session.SaveChangesAsync();
                     }
 
-                    Events.Map<ProductDiscontinuedEvent>().AsDeleteIfExistsOf(e => e.ProductKey);
+                    Events.Map<ProductDiscontinuedEvent>().AsDeleteOf(e => e.ProductKey).IgnoringMisses();
 
                     StartProjecting();
                 });
@@ -754,7 +755,7 @@ namespace LiquidProjections.RavenDB.Specs
                         await session.SaveChangesAsync();
                     }
 
-                    Events.Map<ProductDiscontinuedEvent>().AsDeleteIfExistsOf(e => e.ProductKey);
+                    Events.Map<ProductDiscontinuedEvent>().AsDeleteOf(e => e.ProductKey).IgnoringMisses();
 
                     StartProjecting();
                 });
@@ -792,7 +793,7 @@ namespace LiquidProjections.RavenDB.Specs
                     Events.Map<ProductMovedToCatalogEvent>()
                         .AsUpdateOf(e => e.ProductKey).Using((p, e, ctx) => p.Category = e.Category);
 
-                    Events.Map<ProductDiscontinuedEvent>().AsDeleteIfExistsOf(e => e.ProductKey);
+                    Events.Map<ProductDiscontinuedEvent>().AsDeleteOf(e => e.ProductKey).IgnoringMisses();
 
                     using (IAsyncDocumentSession session = The<IDocumentStore>().OpenAsyncSession())
                     {
@@ -841,7 +842,7 @@ namespace LiquidProjections.RavenDB.Specs
                     Events.Map<ProductAddedToCatalogEvent>()
                         .AsCreateOf(e => e.ProductKey).Using((p, e, ctx) => p.Category = e.Category);
 
-                    Events.Map<ProductDiscontinuedEvent>().AsDeleteIfExistsOf(e => e.ProductKey);
+                    Events.Map<ProductDiscontinuedEvent>().AsDeleteOf(e => e.ProductKey).IgnoringMisses();
 
                     StartProjecting();
                 });
@@ -882,7 +883,7 @@ namespace LiquidProjections.RavenDB.Specs
                         await session.StoreAsync(new ProductCatalogEntry
                         {
                             Id = "ProductCatalogEntry/c350E",
-                            Category = "Hybrids"
+                            Category = "Hybrids",
                         });
 
                         await session.SaveChangesAsync();
@@ -895,7 +896,7 @@ namespace LiquidProjections.RavenDB.Specs
                             .Where(en => en.Category == e.Category)
                             .ToListAsync();
 
-                        foreach (var entry in entries)
+                        foreach (var entry in  entries)
                         {
                             ctx.Session.Delete(entry);
                         }
@@ -946,9 +947,9 @@ namespace LiquidProjections.RavenDB.Specs
             }
 
             [Fact]
-            public void Then_it_should_have_created_the_context()
+            public void Then_it_should_provided_all_relevant_data_as_context()
             {
-                context.ShouldBeEquivalentTo(new RavenProjectionContext
+                context.Should().BeEquivalentTo(new RavenProjectionContext
                 {
                     Checkpoint = 111,
                     TransactionId = "MyTransactionId",
@@ -990,7 +991,7 @@ namespace LiquidProjections.RavenDB.Specs
             [Fact]
             public void Then_it_should_throw()
             {
-                WhenAction.ShouldThrow<ProjectionException>();
+                WhenAction.Should().Throw<ProjectionException>();
             }
         }
 
@@ -1116,7 +1117,7 @@ namespace LiquidProjections.RavenDB.Specs
                 Given(() =>
                 {
                     Events.Map<ProductMovedToCatalogEvent>()
-                        .AsUpdateIfExistsOf(e => e.ProductKey)
+                        .AsUpdateOf(e => e.ProductKey).IgnoringMisses()
                         .Using((p, e, ctx) => p.Category = e.Category);
 
                     StartProjecting();
@@ -1156,7 +1157,7 @@ namespace LiquidProjections.RavenDB.Specs
                     The<LruProjectionCache<ProductCatalogEntry>>().Add(existingEntry);
 
                     Events.Map<ProductMovedToCatalogEvent>()
-                        .AsUpdateIfExistsOf(e => e.ProductKey)
+                        .AsUpdateOf(e => e.ProductKey).IgnoringMisses()
                         .Using((p, e, ctx) => p.Category = e.Category);
 
                     using (IAsyncDocumentSession session = The<IDocumentStore>().OpenAsyncSession())
@@ -1208,7 +1209,7 @@ namespace LiquidProjections.RavenDB.Specs
                     };
 
                     Events.Map<ProductMovedToCatalogEvent>()
-                        .AsUpdateIfExistsOf(e => e.ProductKey)
+                        .AsUpdateOf(e => e.ProductKey).IgnoringMisses()
                         .Using((p, e, ctx) => p.Category = e.Category);
 
                     using (IAsyncDocumentSession session = The<IDocumentStore>().OpenAsyncSession())
@@ -1519,13 +1520,13 @@ namespace LiquidProjections.RavenDB.Specs
             [Fact]
             public void Then_the_child_projector_should_process_each_transaction_before_the_parent_projector()
             {
-                childProjectionStates[0].ShouldBeEquivalentTo(new ChildProjectionState
+                childProjectionStates[0].Should().BeEquivalentTo(new ChildProjectionState
                 {
                     Entry1Exists = true,
                     Entry2Exists = false
                 });
 
-                childProjectionStates[1].ShouldBeEquivalentTo(new ChildProjectionState
+                childProjectionStates[1].Should().BeEquivalentTo(new ChildProjectionState
                 {
                     Entry1Exists = true,
                     Entry2Exists = true
@@ -1573,28 +1574,28 @@ namespace LiquidProjections.RavenDB.Specs
             [Fact]
             public void Then_it_should_throw_projection_exception_with_the_inner_exception()
             {
-                WhenAction.ShouldThrow<ProjectionException>()
+                WhenAction.Should().Throw<ProjectionException>()
                     .Which.InnerException.Should().BeSameAs(The<InvalidOperationException>());
             }
 
             [Fact]
             public void Then_it_should_identify_the_projector_via_the_projection_type()
             {
-                WhenAction.ShouldThrow<ProjectionException>()
+                WhenAction.Should().Throw<ProjectionException>()
                     .Which.Projector.Should().Be(typeof(ProductCatalogEntry).ToString());
             }
 
             [Fact]
             public void Then_it_should_include_the_current_event()
             {
-                WhenAction.ShouldThrow<ProjectionException>()
+                WhenAction.Should().Throw<ProjectionException>()
                     .Which.CurrentEvent.Should().BeSameAs(The<EventEnvelope>());
             }
 
             [Fact]
             public void Then_it_should_include_the_current_transaction_batch()
             {
-                WhenAction.ShouldThrow<ProjectionException>()
+                WhenAction.Should().Throw<ProjectionException>()
                     .Which.TransactionBatch.Should().BeEquivalentTo(The<Transaction>());
             }
         }
