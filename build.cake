@@ -1,5 +1,5 @@
-#tool "nuget:?package=xunit.runner.console"
-#tool "nuget:?package=GitVersion.CommandLine"
+#tool "nuget:?package=xunit.runner.console&version=2.4.1"
+#tool "nuget:?package=GitVersion.CommandLine&version=3.6.5"
 
 //////////////////////////////////////////////////////////////////////
 // ARGUMENTS
@@ -45,7 +45,6 @@ Task("Restore-NuGet-Packages")
 	{ 
 		NoCache = true,
 		Verbosity = NuGetVerbosity.Detailed,
-		ToolPath = "./build/nuget.exe"
 	});
 });
 

@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using LiquidProjections.Abstractions;
-using Raven.Client;
+using Raven.Client.Documents.Session;
 
 namespace LiquidProjections.RavenDB
 {

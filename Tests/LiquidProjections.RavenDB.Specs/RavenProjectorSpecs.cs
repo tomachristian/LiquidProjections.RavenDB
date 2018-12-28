@@ -9,8 +9,8 @@ using FluentAssertions;
 using FluentAssertions.Extensions;
 using LiquidProjections.Abstractions;
 using LiquidProjections.Testing;
-using Raven.Client;
-
+using Raven.Client.Documents;
+using Raven.Client.Documents.Session;
 using Xunit;
 
 namespace LiquidProjections.RavenDB.Specs
@@ -26,7 +26,11 @@ namespace LiquidProjections.RavenDB.Specs
                 Given(() =>
                 {
                     UseThe(new MemoryEventSource());
-                    UseThe(new InMemoryRavenDbBuilder().Build());
+                    var testDriver = new ComposableRavenTestDriver();
+                    UseThe(testDriver);
+
+                    UseThe(testDriver.GetDocumentStore());
+                    
                     UseThe(new LruProjectionCache<ProductCatalogEntry>(1000, TimeSpan.Zero, TimeSpan.FromHours(1), entry => entry.Id, () => DateTime.UtcNow));
                     Events = new EventMapBuilder<ProductCatalogEntry, string, RavenProjectionContext>();
                 });
@@ -892,7 +896,7 @@ namespace LiquidProjections.RavenDB.Specs
                     Events.Map<CategoryDiscontinuedEvent>().As(async (e, ctx) =>
                     {
                         var entries = await ctx.Session.Query<ProductCatalogEntry>()
-                            .Customize(x => x.WaitForNonStaleResultsAsOfLastWrite())
+                            .Customize(x => x.WaitForNonStaleResults())
                             .Where(en => en.Category == e.Category)
                             .ToListAsync();
 
