@@ -5,7 +5,7 @@
         <version>0.0.0.0</version>
         <authors>Dennis Doomen</authors>
         <owners>Dennis Doomen</owners>
-        <projectUrl>https://github.com/dennisdoomen/LiquidProjections</projectUrl>
+        <projectUrl>https://liquidprojections.net/</projectUrl>
         <requireLicenseAcceptance>false</requireLicenseAcceptance>
         <description>An extension to LiquidProjections that uses RavenDB for storing projections.</description>
         <tags></tags>
