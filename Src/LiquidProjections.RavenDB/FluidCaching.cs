@@ -218,7 +218,8 @@ namespace FluidCaching
     {
         private readonly Dictionary<string, IIndexManagement<T>> indexList = new Dictionary<string, IIndexManagement<T>>();
         private readonly LifespanManager<T> lifeSpan;
-
+        private readonly object syncObject = new object();
+        
         /// <summary>Constructor</summary>
         /// <param name="capacity">the normal item limit for cache (Count may exeed capacity due to minAge)</param>
         /// <param name="minAge">the minimium time after an access before an item becomes eligible for removal, during this time
@@ -250,22 +251,35 @@ namespace FluidCaching
             return indexList.TryGetValue(indexName, out index) ? index as IIndex<TKey, T> : null;
         }
 
-        /// <summary>Retrieve a object by index name / key</summary>
-        public Task<T> Get<TKey>(string indexName, TKey key, ItemCreator<TKey, T> item = null)
+        /// <summary>
+        /// Gets an object associated with <paramref name="key"/> from the index identified by <paramref name="indexName"/>
+        /// or tries to create a new one using the
+        /// (optional) factory method provided by <paramref name="createItem"/>
+        /// </summary>
+        /// <returns>
+        /// Returns the object associated with the key or <c>null</c> if no such object exists and
+        /// the <paramref name="createItem"/> was <c>null</c> or returned a <c>null</c>.
+        /// </returns>
+        public Task<T> Get<TKey>(string indexName, TKey key, ItemCreator<TKey, T> createItem = null)
         {
             IIndex<TKey, T> index = GetIndex<TKey>(indexName);
-            return index?.GetItem(key, item);
+            return index?.GetItem(key, createItem);
         }
 
-            /// <summary>AddAsNode a new index to the cache</summary>
+        /// <summary>Adds a new index to the cache</summary>
         /// <typeparam name="TKey">the type of the key value</typeparam>
         /// <param name="indexName">the name to be associated with this list</param>
         /// <param name="getKey">delegate to get key from object</param>
         /// <param name="item">delegate to load object if it is not found in index</param>
+        /// <param name="keyEqualityComparer">The equality comparer to be used to compare the keys. Optional.</param>
         /// <returns>the newly created index</returns>
-        public IIndex<TKey, T> AddIndex<TKey>(string indexName, GetKey<T, TKey> getKey, ItemCreator<TKey, T> item = null)
+        public IIndex<TKey, T> AddIndex<TKey>(
+            string indexName,
+            GetKey<T, TKey> getKey,
+            ItemCreator<TKey, T> item = null,
+            IEqualityComparer<TKey> keyEqualityComparer = null)
         {
-            var index = new Index<TKey, T>(this, lifeSpan, getKey, item);
+            var index = new Index<TKey, T>(this, lifeSpan, getKey, item, keyEqualityComparer);
             indexList[indexName] = index;
             return index;
         }
@@ -275,20 +289,20 @@ namespace FluidCaching
         /// </summary>
         public void Add(T item)
         {
-            AddAsNode(item);
+            TryAddAsNode(item);
         }
 
         /// <summary>
         /// AddAsNode an item to the cache
         /// </summary>
-        internal INode<T> AddAsNode(T item)
+        internal Node<T> TryAddAsNode(T item)
         {
             if (item == null)
             {
                 return null;
             }
 
-            INode<T> node = FindExistingNode(item);
+            Node<T> node = FindExistingNode(item);
 
             // dupl is used to prevent total count from growing when item is already in indexes (only new Nodes)
             bool isDuplicate = (node != null) && (node.Value == item);
@@ -304,7 +318,7 @@ namespace FluidCaching
                     }
                 }
 
-                lock (this)
+                lock (syncObject)
                 {
                     if (!isDuplicate)
                     {
@@ -322,9 +336,9 @@ namespace FluidCaching
             return node;
         }
 
-        private INode<T> FindExistingNode(T item)
+        private Node<T> FindExistingNode(T item)
         {
-            INode<T> node = null;
+            Node<T> node = null;
             foreach (KeyValuePair<string, IIndexManagement<T>> keyValue in indexList)
             {
                 if ((node = keyValue.Value.FindItem(item)) != null)
@@ -393,13 +407,13 @@ namespace FluidCaching
         interface IIndex<TKey, T> where T : class
     {
         /// <summary>
-        /// Getter for index
+        /// Gets an object from the index based on the provided <paramref name="key"/> or tries to create a new one using the
+        /// (optional) factory method provided by <paramref name="createItem"/>
         /// </summary>
-        /// <param name="key">key to find (or load if needed)</param>
-        /// <param name="createItem">
-        /// An optional delegate that is used to create the actual object if it doesn't exist in the cache.
-        /// </param>
-        /// <returns>the object value associated with the cache</returns>
+        /// <returns>
+        /// Returns the object associated with the key or <c>null</c> if no such object exists and
+        /// the <paramref name="createItem"/> was <c>null</c> or returned a <c>null</c>.
+        /// </returns>
         Task<T> GetItem(TKey key, ItemCreator<TKey, T> createItem = null);
 
         /// <summary>Delete object that matches key from cache</summary>
@@ -416,8 +430,8 @@ namespace FluidCaching
     internal interface IIndexManagement<T> where T : class
     {
         void ClearIndex();
-        bool AddItem(INode<T> item);
-        INode<T> FindItem(T item);
+        bool AddItem(Node<T> item);
+        Node<T> FindItem(T item);
         int RebuildIndex();
     }
 }
@@ -432,72 +446,96 @@ namespace FluidCaching
     {
         private readonly FluidCache<T> owner;
         private readonly LifespanManager<T> lifespanManager;
-        private Dictionary<TKey, WeakReference<INode<T>>> index;
+        private Dictionary<TKey, WeakReference<Node<T>>> index;
         private readonly GetKey<T, TKey> _getKey;
         private readonly ItemCreator<TKey, T> loadItem;
-
+        private readonly IEqualityComparer<TKey> keyEqualityComparer;
+        private readonly object syncObject = new object();
+        
         /// <summary>constructor</summary>
         /// <param name="owner">parent of index</param>
         /// <param name="lifespanManager"></param>
         /// <param name="getKey">delegate to get key from object</param>
         /// <param name="loadItem">delegate to load object if it is not found in index</param>
-        public Index(FluidCache<T> owner, LifespanManager<T> lifespanManager, GetKey<T, TKey> getKey,
-            ItemCreator<TKey, T> loadItem)
+        /// <param name="keyEqualityComparer">The equality comparer to be used to compare the keys. Optional.</param>
+        public Index(
+            FluidCache<T> owner,
+            LifespanManager<T> lifespanManager,
+            GetKey<T, TKey> getKey,
+            ItemCreator<TKey, T> loadItem,
+            IEqualityComparer<TKey> keyEqualityComparer)
         {
             Debug.Assert(owner != null, "owner argument required");
             Debug.Assert(getKey != null, "GetKey delegate required");
             this.owner = owner;
             this.lifespanManager = lifespanManager;
-            index = new Dictionary<TKey, WeakReference<INode<T>>>();
             _getKey = getKey;
             this.loadItem = loadItem;
+            this.keyEqualityComparer = keyEqualityComparer;
             RebuildIndex();
         }
 
-        /// <summary>Getter for index</summary>
-        /// <param name="key">key to find (or load if needed)</param>
-        /// <param name="createItem">
-        /// An optional factory method for creating the item if it does not exist in the cache.
-        /// </param>
-        /// <returns>the object value associated with key, or null if not found or could not be loaded</returns>
         public async Task<T> GetItem(TKey key, ItemCreator<TKey, T> createItem = null)
         {
-            INode<T> node = FindExistingNodeByKey(key);
-            node?.Touch();
-
-            ItemCreator<TKey, T> creator = createItem ?? loadItem;
-            if ((node?.Value == null) && (creator != null))
+            T value = null;
+            
+            lock (syncObject)
             {
-                T value = await creator(key);
-
-                lock (this)
+                Node<T> node = FindExistingNodeByKey(key);
+                if (node != null)
                 {
-                    node = FindExistingNodeByKey(key);
-                    if (node?.Value == null)
-                    {
-                        node = owner.AddAsNode(value);
-                    }
+                    value = node.Value;
+
+                    node.Touch();
+                }
+            }
+
+            if (value == null)
+            {
+                value = await TryCreate(key, createItem);
+                if (value != null)
+                {
+                    Node<T> newOrExistingNode = owner.TryAddAsNode(value);
+                    value = newOrExistingNode.Value;
 
                     lifespanManager.CheckValidity();
                 }
             }
 
-            return node?.Value;
+            return value;
+        }
+
+        private async Task<T> TryCreate(TKey key, ItemCreator<TKey, T> createItem = null)
+        {
+            ItemCreator<TKey, T> creator = createItem ?? loadItem;
+            if (creator != null)
+            {
+                Task<T> task = creator(key);
+                if (task == null)
+                {
+                    throw new ArgumentNullException(nameof(createItem),
+                        "Expected a non-null Task. Did you intend to return a null-returning Task instead?");
+                }
+
+                return await task;
+            }
+
+            return null;
         }
 
         /// <summary>Delete object that matches key from cache</summary>
         /// <param name="key"></param>
         public void Remove(TKey key)
         {
-            INode<T> node = FindExistingNodeByKey(key);
+            Node<T> node = FindExistingNodeByKey(key);
             if (node != null)
             {
-                lock (this)
+                lock (syncObject)
                 {
                     node = FindExistingNodeByKey(key);
                     if (node != null)
                     {
-                        node.Remove();
+                        node.RemoveFromCache();
 
                         lifespanManager.CheckValidity();
                     }
@@ -506,15 +544,15 @@ namespace FluidCaching
         }
 
         /// <summary>try to find this item in the index and return Node</summary>
-        public INode<T> FindItem(T item)
+        public Node<T> FindItem(T item)
         {
             return FindExistingNodeByKey(_getKey(item));
         }
 
-        private INode<T> FindExistingNodeByKey(TKey key)
+        private Node<T> FindExistingNodeByKey(TKey key)
         {
-            WeakReference<INode<T>> reference;
-            INode<T> node;
+            WeakReference<Node<T>> reference;
+            Node<T> node;
             if (index.TryGetValue(key, out reference) && reference.TryGetTarget(out node))
             {
                 lifespanManager.Stats.RegisterHit();
@@ -527,7 +565,7 @@ namespace FluidCaching
         /// <summary>Remove all items from index</summary>
         public void ClearIndex()
         {
-            lock (this)
+            lock (syncObject)
             {
                 index.Clear();
             }
@@ -538,16 +576,16 @@ namespace FluidCaching
         /// <returns>
         /// Returns <c>true</c> if the item could be added to the index, or <c>false</c> otherwise.
         /// </returns>
-        public bool AddItem(INode<T> item)
+        public bool AddItem(Node<T> item)
         {
-            lock (this)
+            lock (syncObject)
             {
                 TKey key = _getKey(item.Value);
 
-                INode<T> node;
+                Node<T> node;
                 if (!index.ContainsKey(key) || !index[key].TryGetTarget(out node) || node.Value == null)
                 {
-                    index[key] = new WeakReference<INode<T>>(item, trackResurrection: false);
+                    index[key] = new WeakReference<Node<T>>(item, trackResurrection: false);
                     return true;
                 }
 
@@ -558,29 +596,16 @@ namespace FluidCaching
         /// <summary>removes all items from index and reloads each item (this gets rid of dead nodes)</summary>
         public int RebuildIndex()
         {
-            lock (this)
+            lock (syncObject)
             {
                 // Create a new ConcurrentDictionary, this way there is no need for locking the index itself
                 var keyValues = lifespanManager
-                    .ToDictionary(item => _getKey(item.Value), item => new WeakReference<INode<T>>(item));
+                    .ToDictionary(item => _getKey(item.Value), item => new WeakReference<Node<T>>(item));
 
-                index = new Dictionary<TKey, WeakReference<INode<T>>>(keyValues);
+                index = new Dictionary<TKey, WeakReference<Node<T>>>(keyValues, keyEqualityComparer);
                 return index.Count;
             }
         }
-    }
-}
-
-namespace FluidCaching
-{
-    /// <summary>
-    /// This interface exposes the public part of a LifespanMgr.Node
-    /// </summary>
-    internal interface INode<T> where T : class
-    {
-        T Value { get; }
-        void Touch();
-        void Remove();
     }
 }
 
@@ -617,8 +642,29 @@ namespace FluidCaching
 
 namespace FluidCaching
 {
-    internal class LifespanManager<T> : IEnumerable<INode<T>> where T : class
+    internal class LifespanManager<T> : IEnumerable<Node<T>> where T : class
     {
+        /// <summary>
+        /// The number of bags which should be enough to store the requested capacity of items. The heuristic is that each
+        /// bag should contain about 5% of the capacity. 
+        /// </summary>
+        private const int PreferedNrOfBags = 20;
+
+        /// <summary>
+        /// Numbers of bags to keep open as a buffer when the minimum age forces more items to be there than the capacity allows.
+        /// </summary>
+        private const int EmptyBagsBuffer = 5;
+
+        /// <summary>
+        /// No item should be kept in the cache for more than this amount, irrespective of the consumer-provided max age.
+        /// </summary>
+        private readonly TimeSpan MaxMaxAge = TimeSpan.FromHours(12);
+
+        /// <summary>
+        /// Maximum interval at which we want to a validity check.
+        /// </summary>
+        private readonly TimeSpan MaxInterval = TimeSpan.FromMinutes(3);
+
         private readonly FluidCache<T> owner;
         private readonly TimeSpan minAge;
         private readonly GetNow getNow;
@@ -631,18 +677,25 @@ namespace FluidCaching
         internal int itemsInCurrentBag;
         private int currentBagIndex;
         private int oldestBagIndex;
+        private readonly object syncObject = new object();
 
         public LifespanManager(FluidCache<T> owner, int capacity, TimeSpan minAge, TimeSpan maxAge, GetNow getNow)
         {
             this.owner = owner;
-            double maxMS = Math.Min(maxAge.TotalMilliseconds, (double) 12 * 60 * 60 * 1000); // max = 12 hours
             this.minAge = minAge;
             this.getNow = getNow;
-            this.maxAge = TimeSpan.FromMilliseconds(maxMS);
-            validatyCheckInterval = TimeSpan.FromMilliseconds(maxMS / 240.0); // max timeslice = 3 min
-            bagItemLimit = Math.Max(capacity / 20, 1); // max 5% of capacity per bag
 
-            const int nrBags = 265; // based on 240 timeslices + 20 bags for ItemLimit + 5 bags empty buffer
+            this.maxAge = TimeSpan.FromMilliseconds(Math.Min(maxAge.TotalMilliseconds, MaxMaxAge.TotalMilliseconds));
+
+            validatyCheckInterval =
+                TimeSpan.FromMilliseconds(Math.Min(maxAge.TotalMilliseconds, MaxInterval.TotalMilliseconds));
+
+            bagItemLimit = Math.Max(capacity / PreferedNrOfBags, 1);
+
+            int nrTimeSlices = (int)(MaxMaxAge.TotalMilliseconds / MaxInterval.TotalMilliseconds);
+
+            // NOTE: Based on 240 timeslices + 20 bags for ItemLimit + 5 bags empty buffer
+            int nrBags = nrTimeSlices + PreferedNrOfBags + EmptyBagsBuffer;
             bags = new OrderedAgeBagCollection<T>(nrBags);
 
             Stats = new CacheStats(capacity, nrBags, bagItemLimit, minAge, this.maxAge, validatyCheckInterval);
@@ -657,9 +710,9 @@ namespace FluidCaching
         /// <summary>checks to see if cache is still valid and if LifespanMgr needs to do maintenance</summary>
         public void CheckValidity()
         {
-            // Note: Monitor.Enter(this) / Monitor.Exit(this) is the same as lock(this)... We are using Monitor.TryEnter() because it
+            // NOTE: Monitor.Enter(this) / Monitor.Exit(this) is the same as lock(this)... We are using Monitor.TryEnter() because it
             // does not wait for a lock, if lock is currently held then skip and let next Touch perform cleanup.
-            if (RequiresCleanup && Monitor.TryEnter(this))
+            if (RequiresCleanup && Monitor.TryEnter(syncObject))
             {
                 try
                 {
@@ -678,7 +731,7 @@ namespace FluidCaching
                 }
                 finally
                 {
-                    Monitor.Exit(this);
+                    Monitor.Exit(syncObject);
                 }
             }
         }
@@ -696,54 +749,66 @@ namespace FluidCaching
         /// </remarks>
         private void CleanUp(DateTime now)
         {
-            lock (this)
+            lock (syncObject)
             {
                 int itemsAboveCapacity = Stats.Current - Stats.Capacity;
                 AgeBag<T> bag = bags[OldestBagIndex];
 
-                while (AlmostOutOfBags || bag.HasExpired(maxAge, now) ||
-                       (itemsAboveCapacity > 0 && bag.HasReachedMinimumAge(minAge, now)))
+                while (!HasProcessedAllBags && (AlmostOutOfBags || BagNeedsCleaning(bag, itemsAboveCapacity, now)))
                 {
-                    // cache is still too big / old so remove oldest bag
-                    Node<T> node = bag.First;
-                    bag.First = null;
+                    itemsAboveCapacity = CleanBag(bag, itemsAboveCapacity);
 
-                    while (node != null)
-                    {
-                        Node<T> next = node.Next;
-                        node.Next = null;
-                        if (node.Value != null && node.Bag != null)
-                        {
-                            if (node.Bag == bag)
-                            {
-                                // item has not been touched since bag was closed, so remove it from LifespanMgr
-                                ++itemsAboveCapacity;
-                                node.Remove();
-                            }
-                            else
-                            {
-                                // item has been touched and should be moved to correct age bag now
-                                node.Next = node.Bag.First;
-                                node.Bag.First = node;
-                            }
-                        }
-
-                        node = next;
-                    }
-
-                    bag = bags[++OldestBagIndex];
-
-                    if (HasProcessedAllBags)
-                    {
-                        break;
-                    }
+                    ++OldestBagIndex;
+                    bag = bags[OldestBagIndex];
                 }
 
-                OpenBag(++CurrentBagIndex);
+                ++CurrentBagIndex;
+                OpenBag(CurrentBagIndex);
 
                 EnsureIndexIsValid();
             }
         }
+
+        private static int CleanBag(AgeBag<T> bag, int itemsAboveCapacity)
+        {
+            Node<T> node = bag.First;
+            bag.First = null;
+
+            while (node != null)
+            {
+                Node<T> nextNode = node.Next;
+
+                node.Next = null;
+                if (node.Value != null && node.Bag != null)
+                {
+                    if (node.Bag == bag)
+                    {
+                        // item has not been touched since bag was closed, so remove it from LifespanMgr
+                        --itemsAboveCapacity;
+                        node.RemoveFromCache();
+                    }
+                    else
+                    {
+                        // item has been touched and should be moved to correct age bag now
+                        node.Next = node.Bag.First;
+                        node.Bag.First = node;
+                    }
+                }
+
+                node = nextNode;
+            }
+
+            return itemsAboveCapacity;
+        }
+
+        private bool BagNeedsCleaning(AgeBag<T> bag, int itemsAboveCapacity, DateTime now)
+        {
+            return bag.HasExpired(maxAge, now) || (itemsAboveCapacity > 0 && bag.HasReachedMinimumAge(minAge, now));
+        }
+
+        private bool HasProcessedAllBags => (OldestBagIndex == CurrentBagIndex);
+
+        private bool AlmostOutOfBags => (CurrentBagIndex - OldestBagIndex) > (bags.Count - EmptyBagsBuffer);
 
         private void EnsureIndexIsValid()
         {
@@ -756,10 +821,6 @@ namespace FluidCaching
                 }
             }
         }
-        
-        private bool AlmostOutOfBags => (CurrentBagIndex - OldestBagIndex) > (bags.Count - 5);
-
-        private bool HasProcessedAllBags => (OldestBagIndex == CurrentBagIndex);
 
         public CacheStats Stats { get; }
 
@@ -786,7 +847,7 @@ namespace FluidCaching
         /// <summary>Remove all items from LifespanMgr and reset</summary>
         public void Clear()
         {
-            lock (this)
+            lock (syncObject)
             {
                 bags.Empty();
 
@@ -800,7 +861,7 @@ namespace FluidCaching
         /// <summary>ready a new current AgeBag for use and close the previous one</summary>
         private void OpenBag(int bagNumber)
         {
-            lock (this)
+            lock (syncObject)
             {
                 DateTime now = getNow();
 
@@ -832,7 +893,7 @@ namespace FluidCaching
         }
 
         /// <summary>Create item enumerator</summary>
-        public IEnumerator<INode<T>> GetEnumerator()
+        public IEnumerator<Node<T>> GetEnumerator()
         {
             for (int bagNumber = CurrentBagIndex; bagNumber >= OldestBagIndex; --bagNumber)
             {
@@ -850,7 +911,7 @@ namespace FluidCaching
 
         public Node<T> AddToHead(Node<T> node)
         {
-            lock (this)
+            lock (syncObject)
             {
                 Node<T> next = CurrentBag.First;
                 CurrentBag.First = node;
@@ -874,9 +935,10 @@ namespace FluidCaching
     /// <summary>
     /// Represents a node in a linked list of items. 
     /// </summary>
-    internal class Node<T> : INode<T> where T : class
+    internal class Node<T> where T : class
     {
         private readonly LifespanManager<T> manager;
+        private readonly object syncObject = new object();
 
         /// <summary>constructor</summary>
         public Node(LifespanManager<T> manager, T value)
@@ -897,12 +959,15 @@ namespace FluidCaching
         /// </summary>
         public void Touch()
         {
-            if ((Value != null) && (Bag != manager.CurrentBag))
+            lock (syncObject)
             {
-                RegisterWithLifespanManager();
+                if ((Value != null) && (Bag != manager.CurrentBag))
+                {
+                    RegisterWithLifespanManager();
 
-                Bag = manager.CurrentBag;
-                Interlocked.Increment(ref manager.itemsInCurrentBag);
+                    Bag = manager.CurrentBag;
+                    Interlocked.Increment(ref manager.itemsInCurrentBag);
+                }
             }
         }
 
@@ -910,11 +975,11 @@ namespace FluidCaching
         {
             if (Bag == null)
             {
-                lock (this)
+                lock (syncObject)
                 {
                     if (Bag == null)
                     {
-                        // if node.AgeBag==null then the object is not currently managed by LifespanMgr so add it
+                        // if Bag is null, then the object is not currently managed by the life span manager
                         Next = manager.AddToHead(this);
                     }
                 }
@@ -924,11 +989,11 @@ namespace FluidCaching
         /// <summary>
         /// Removes the object from node, thereby removing it from all indexes and allows it to be garbage collected
         /// </summary>
-        public void Remove()
+        public void RemoveFromCache()
         {
             if ((Bag != null) && (Value != null))
             {
-                lock (this)
+                lock (syncObject)
                 {
                     if ((Bag != null) && (Value != null))
                     {
@@ -997,7 +1062,7 @@ namespace FluidCaching
                 while (node != null)
                 {
                     Node<T> next = node.Next;
-                    node.Remove();
+                    node.RemoveFromCache();
                     node = next;
                 }
             }
