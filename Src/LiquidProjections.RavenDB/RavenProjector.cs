@@ -20,6 +20,7 @@ namespace LiquidProjections.RavenDB
         private readonly Func<IAsyncDocumentSession> sessionFactory;
         private int batchSize;
         private readonly RavenEventMapConfigurator<TProjection> mapConfigurator;
+        private string projectorName;
         private ShouldRetry shouldRetry = (exception, count) => Task.FromResult(false);
 
         /// <summary>
@@ -83,12 +84,29 @@ namespace LiquidProjections.RavenDB
         /// <summary>
         /// The name of the collection in RavenDB that contains the projections.
         /// Defaults to the name of the projection type <typeparamref name="TProjection"/>.
-        /// Is also used as the document name of the projector state in RavenCheckpoints collection.
         /// </summary>
         public string CollectionName
         {
             get => mapConfigurator.CollectionName;
             set => mapConfigurator.CollectionName = value;
+        }
+
+        /// <summary>
+        /// The name of the projector that is used as the document name of the projector state in RavenCheckpoints collection.
+        /// Defaults to the <see cref="CollectionName"/> if not set.
+        /// </summary>
+        public string ProjectorName
+        {
+            get => projectorName ?? CollectionName;
+            set
+            {
+                if (string.IsNullOrEmpty(value))
+                {
+                    throw new ArgumentException("Projector name is missing.", nameof(value));
+                }
+
+                projectorName = value;
+            }
         }
 
         /// <summary>
@@ -234,6 +252,6 @@ namespace LiquidProjections.RavenDB
             }
         }
 
-        private string GetCheckpointId() => "RavenCheckpoints/" + CollectionName;
+        private string GetCheckpointId() => "RavenCheckpoints/" + ProjectorName;
     }
 }
